@@ -9,7 +9,7 @@
 ## Start
     uvicorn server:app --port 8000
     # test without device:  DRY_RUN=1 uvicorn server:app --port 8000
-Then open http://localhost:8000 öffnen.
+Then open http://localhost:8000.
 
 ## How to use
 Search for an address or click on the map (start, stops, destination), enter the duration in minutes for each point,
