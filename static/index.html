@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><title>iOS Location Sim</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+body{margin:0;font:14px system-ui;display:flex;height:100vh}
+#side{width:360px;padding:12px;overflow:auto;box-sizing:border-box;border-right:1px solid #ccc}
+#map{flex:1}
+input,select,button{font:inherit;padding:5px;margin:2px 0}
+.row{display:flex;gap:6px;align-items:center}
+.stop{border:1px solid #ddd;border-radius:6px;padding:6px;margin:4px 0}
+.res{cursor:pointer;padding:4px;border-bottom:1px solid #eee}.res:hover{background:#eef}
+#bar{height:6px;background:#ddd;margin:8px 0}#fill{height:100%;width:0;background:#2a7}
+</style></head><body>
+<div id="side">
+ <h3>Routen-Simulator</h3>
+ <div class="row"><input id="q" placeholder="Adresse suchen..." style="flex:1"><button id="go">Suchen</button></div>
+ <div id="results"></div>
+ <p style="color:#666">Oder Karte anklicken, um Punkte hinzuzufuegen. Rechtsklick = Teleport.</p>
+ <div id="stops"></div>
+ <div class="row">
+  <select id="profile"><option value="foot">Zu Fuss</option><option value="bike">Fahrrad</option><option value="car">Auto</option></select>
+  <input id="speed" type="number" value="5" min="1" style="width:60px"> km/h
+ </div>
+ <div class="row"><button id="calc">Route berechnen</button><button id="play">Start</button></div>
+ <div class="row"><button id="pause">Pause</button><button id="resume">Weiter</button><button id="stop">Stop</button><button id="reset">Reset</button></div>
+ <div id="info"></div><div id="bar"><div id="fill"></div></div><div id="state"></div>
+</div>
+<div id="map"></div>
+<script>
+const map=L.map('map').setView([49.6341,8.3507],13);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+let stops=[],routeLayer=L.layerGroup().addTo(map),me=L.circleMarker([0,0],{radius:8,color:'red'}).addTo(map);
+const $=id=>document.getElementById(id);
+const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined}).then(async r=>{if(!r.ok)throw new Error((await r.json()).detail||r.status);return r.json().catch(()=>({}))});
+function addStop(lat,lon,label){const m=L.marker([lat,lon]).addTo(map);stops.push({lat,lon,label,dwell:0,m});render();}
+function render(){$('stops').innerHTML='';stops.forEach((s,i)=>{const d=document.createElement('div');d.className='stop';
+ const role=i==0?'Start':i==stops.length-1&&i>0?'Ziel':'Stopp '+i;
+ d.innerHTML=`<b>${role}</b> ${s.label.slice(0,40)}<div class=row>Aufenthalt <input type=number min=0 value=${s.dwell} style="width:60px"> min <button>x</button></div>`;
+ d.querySelector('input').onchange=e=>s.dwell=+e.target.value;
+ d.querySelector('button').onclick=()=>{map.removeLayer(s.m);stops.splice(i,1);render();};
+ $('stops').appendChild(d);});}
+map.on('click',e=>addStop(e.latlng.lat,e.latlng.lng,e.latlng.lat.toFixed(5)+', '+e.latlng.lng.toFixed(5)));
+map.on('contextmenu',e=>post('/api/teleport',{lat:e.latlng.lat,lon:e.latlng.lng}).catch(err=>alert(err.message)));
+async function search(){const r=await fetch('/api/geocode?q='+encodeURIComponent($('q').value)).then(r=>r.json());
+ $('results').innerHTML='';r.forEach(x=>{const d=document.createElement('div');d.className='res';d.textContent=x.label;
+ d.onclick=()=>{addStop(x.lat,x.lon,x.label);map.setView([x.lat,x.lon],14);$('results').innerHTML='';};$('results').appendChild(d);});}
+$('go').onclick=search;$('q').onkeydown=e=>{if(e.key=='Enter')search();};
+const body=()=>({waypoints:stops.map(s=>({lat:s.lat,lon:s.lon,dwell_min:s.dwell})),profile:$('profile').value,speed_kmh:+$('speed').value});
+$('calc').onclick=async()=>{try{const r=await post('/api/route',body());routeLayer.clearLayers();
+ r.legs.forEach(l=>L.polyline(l,{color:'#36f',weight:5}).addTo(routeLayer));map.fitBounds(routeLayer.getLayers().map(l=>l.getBounds()).reduce((a,b)=>a.extend(b)));
+ $('info').textContent=`${(r.distance_m/1000).toFixed(2)} km, Simulationsdauer ca. ${Math.round(r.sim_duration_s/60)} min`;}catch(e){alert(e.message)}};
+$('play').onclick=()=>post('/api/play',body()).catch(e=>alert(e.message));
+['pause','resume','stop','reset'].forEach(a=>$(a).onclick=()=>post('/api/'+a));
+const ws=new WebSocket(`ws://${location.host}/ws`);
+ws.onmessage=e=>{const m=JSON.parse(e.data);
+ if(m.type=='pos'){me.setLatLng([m.lat,m.lon]);$('fill').style.width=(m.progress*100)+'%';
+  $('state').textContent=m.hold_s>5?`Aufenthalt: ${Math.round(m.hold_s/60)} min`:'';}
+ if(m.type=='state')$('state').textContent='Status: '+m.state;};
+</script></body></html>

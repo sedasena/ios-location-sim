@@ -1,0 +1,4 @@
+pymobiledevice3
+fastapi
+uvicorn[standard]
+httpx
